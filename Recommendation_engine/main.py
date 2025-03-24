@@ -2,20 +2,43 @@ import numpy as np
 import pandas as pd
 import pickle
 import os
+import threading
+import logging
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import MinMaxScaler
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
 
 class KNNElectiveRecommender:
     def __init__(self):
-        self.tfidf_vectorizer = TfidfVectorizer(stop_words='english')
-        self.knn_model = NearestNeighbors(n_neighbors=3, algorithm='brute', metric='cosine')
+        # Modified TF-IDF parameters for small document counts
+        self.tfidf_vectorizer = TfidfVectorizer(
+            stop_words='english',
+            ngram_range=(1, 2),
+            max_features=5000,
+            min_df=1,     # Changed to 1 to handle small document counts
+            max_df=1.0    # Changed to 1.0 to handle small document counts
+        )
+        
+        self.knn_model = NearestNeighbors(
+            n_neighbors=3,
+            algorithm='auto',
+            metric='cosine',
+            n_jobs=-1
+        )
+        
         self.courses_df = None
+        self.content_matrix = None
+        self._lock = threading.Lock()
 
     def load_sample_data(self):
         """Loads dataset with more detailed courses"""
@@ -71,61 +94,109 @@ class KNNElectiveRecommender:
         ])
 
     def prepare_model(self, filtered_df):
-        """Prepares the KNN model for selected courses"""
-        filtered_df['content'] = filtered_df.apply(
-            lambda row: ' '.join([
-                row['title'], 
-                row['description'], 
-                ' '.join(row['keywords'] * 3)  # Weight keywords higher
-            ]).lower(), 
-            axis=1
-        )
+        """Enhanced model preparation with weighted features"""
+        try:
+            with self._lock:
+                filtered_df['content'] = filtered_df.apply(
+                    lambda row: ' '.join([
+                        row['title'] * 3,
+                        row['description'],
+                        ' '.join(row['keywords'] * 4)
+                    ]).lower(),
+                    axis=1
+                )
 
-        # TF-IDF Vectorization
-        content_matrix = self.tfidf_vectorizer.fit_transform(filtered_df['content'])
+                # Apply TF-IDF
+                self.content_matrix = self.tfidf_vectorizer.fit_transform(filtered_df['content'])
+                
+                # Dynamic neighbor selection based on dataset size
+                n_neighbors = min(3, len(filtered_df))
+                self.knn_model.set_params(n_neighbors=n_neighbors)
+                self.knn_model.fit(self.content_matrix)
 
-        # Fit KNN model with dynamic neighbors
-        self.knn_model.set_params(n_neighbors=min(3, len(filtered_df)))
-        self.knn_model.fit(content_matrix)
+                return filtered_df, self.content_matrix
+        except Exception as e:
+            logger.error(f"Error in prepare_model: {str(e)}")
+            raise
 
-        return filtered_df, content_matrix
+    def recommend_elective(self, selected_course_ids, skills, area_of_interest, 
+                         future_career_paths, **kwargs):
+        """Enhanced recommendation logic with better error handling"""
+        try:
+            selected_courses_df = self.courses_df[self.courses_df['course_id'].isin(selected_course_ids)]
+            if selected_courses_df.empty:
+                return {"error": "Invalid course IDs"}
 
-    def recommend_elective(self, selected_course_ids, skills, area_of_interest, future_career_paths, previous_fav_subjects):
-        """Recommends the best elective from selected courses"""
-        if len(selected_course_ids) == 0:
-            return {"error": "No courses selected"}
-        if len(selected_course_ids) == 1:
-            return {"error": "Please select at least 2 courses"}
-        selected_courses_df = self.courses_df[self.courses_df['course_id'].isin(selected_course_ids)]
-        if selected_courses_df.empty:
-            return {"error": "Invalid course IDs"}
+            # Case 1: Single course selected
+            if len(selected_courses_df) == 1:
+                course = selected_courses_df.iloc[0]
+                return {
+                    "course_id": course["course_id"],
+                    "title": course["title"],
+                    "description": course["description"],
+                    "keywords": course["keywords"],
+                    "match_score": 100.0,
+                    "note": "Single course selection: returning the selected course"
+                }
 
-        # Train KNN only on selected courses
-        filtered_df, content_matrix = self.prepare_model(selected_courses_df)
+            # Case 2: Multiple courses
+            filtered_df, content_matrix = self.prepare_model(selected_courses_df)
 
-        # Create user profile from multiple factors
-        user_profile = (
-            ' '.join(filtered_df['content'].values) + " " +
-            ' '.join(skills * 2) +  
-            ' '.join(area_of_interest * 2) +
-            ' '.join(future_career_paths * 3) +  
-            ' '.join(previous_fav_subjects * 3)
-        )
-        user_vector = self.tfidf_vectorizer.transform([user_profile])
+            # Create user profile without previous subjects
+            user_profile_components = [
+                ' '.join(skills) * 3,
+                ' '.join(area_of_interest) * 2,
+                ' '.join(future_career_paths) * 4
+            ]
+            
+            user_profile = ' '.join(component.lower() for component in user_profile_components if component)
+            user_vector = self.tfidf_vectorizer.transform([user_profile])
 
-        # Find best elective among selected courses
-        distances, indices = self.knn_model.kneighbors(user_vector, n_neighbors=3)
+            # Get recommendations
+            distances, indices = self.knn_model.kneighbors(user_vector)
+            similarity_scores = [round(float((1 - dist) * 100), 2) for dist in distances.flatten()]
 
-        recommended_courses = [filtered_df.iloc[idx] for idx in indices.flatten()]
-        best_elective = recommended_courses[1] if len(recommended_courses) > 1 else recommended_courses[0]
+            # Get recommendations with scores
+            recommendations = []
+            for idx, score in zip(indices.flatten(), similarity_scores):
+                course = filtered_df.iloc[idx]
+                if course["course_id"] not in selected_course_ids:
+                    recommendations.append({
+                        "course_id": course["course_id"],
+                        "title": course["title"],
+                        "description": course["description"],
+                        "keywords": course["keywords"],
+                        "match_score": score
+                    })
+                    break
 
-        return {
-            "course_id": best_elective["course_id"],
-            "title": best_elective["title"],
-            "description": best_elective["description"],
-            "keywords": best_elective["keywords"],
-            "match_score": round(float((1 - distances.flatten()[1]) * 100), 2)
-        }
+            # If no non-selected course found, return the best matching course
+            if not recommendations:
+                best_idx = indices.flatten()[0]
+                best_course = filtered_df.iloc[best_idx]
+                return {
+                    "course_id": best_course["course_id"],
+                    "title": best_course["title"],
+                    "description": best_course["description"],
+                    "keywords": best_course["keywords"],
+                    "match_score": similarity_scores[0],
+                    "note": "Best matching course from selected courses"
+                }
+
+            return recommendations[0]
+
+        except Exception as e:
+            logger.error(f"Error in recommendation: {str(e)}")
+            # Last resort: Return the first course from selected courses
+            course = selected_courses_df.iloc[0]
+            return {
+                "course_id": course["course_id"],
+                "title": course["title"],
+                "description": course["description"],
+                "keywords": course["keywords"],
+                "match_score": 100.0,
+                "note": "Fallback recommendation due to processing error"
+            }
 
 # Initialize recommender
 recommender = KNNElectiveRecommender()
@@ -138,9 +209,19 @@ def initialize():
 
 @app.route('/api/recommend', methods=['POST'])
 def recommend_elective():
-    """API to get the best elective from selected courses"""
-    data = request.json
-    return jsonify(recommender.recommend_elective(**data))
+    """API endpoint with better error handling"""
+    try:
+        data = request.json
+        required_fields = ['selected_course_ids', 'skills', 'area_of_interest', 'future_career_paths']
+        
+        if not all(field in data for field in required_fields):
+            return jsonify({"error": "Missing required fields"}), 400
+
+        result = recommender.recommend_elective(**data)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"API error: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
