@@ -92,6 +92,10 @@ class KNNElectiveRecommender:
 
     def recommend_elective(self, selected_course_ids, skills, area_of_interest, future_career_paths, previous_fav_subjects):
         """Recommends the best elective from selected courses"""
+        if len(selected_course_ids) == 0:
+            return {"error": "No courses selected"}
+        if len(selected_course_ids) == 1:
+            return {"error": "Please select at least 2 courses"}
         selected_courses_df = self.courses_df[self.courses_df['course_id'].isin(selected_course_ids)]
         if selected_courses_df.empty:
             return {"error": "Invalid course IDs"}
