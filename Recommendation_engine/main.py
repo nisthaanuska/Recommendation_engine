@@ -444,36 +444,39 @@ class KNNElectiveRecommender:
         ])
 
     def prepare_model(self, filtered_df):
-        """Enhanced model preparation with weighted features"""
+        """Enhanced model preparation with fixed DataFrame warning"""
         try:
-            with self._lock:
-                filtered_df['content'] = filtered_df.apply(
-                    lambda row: ' '.join([
-                        row['title'] * 3,
-                        row['description'],
-                        ' '.join(row['keywords'] * 4)
-                    ]).lower(),
-                    axis=1
-                )
+            # Create a copy to avoid the SettingWithCopyWarning
+            filtered_df = filtered_df.copy()
+            
+            # Now modify the copy
+            filtered_df['content'] = filtered_df.apply(
+                lambda row: ' '.join([
+                    row['title'] * 3,
+                    row['description'],
+                    ' '.join(row['keywords'] * 4)
+                ]).lower(),
+                axis=1
+            )
 
-                # Apply TF-IDF
-                self.content_matrix = self.tfidf_vectorizer.fit_transform(filtered_df['content'])
-                
-                # Dynamic neighbor selection based on dataset size
-                n_neighbors = min(3, len(filtered_df))
-                self.knn_model.set_params(n_neighbors=n_neighbors)
-                self.knn_model.fit(self.content_matrix)
+            # Apply TF-IDF
+            self.content_matrix = self.tfidf_vectorizer.fit_transform(filtered_df['content'])
+            
+            # Dynamic neighbor selection
+            n_neighbors = min(3, len(filtered_df))
+            self.knn_model.set_params(n_neighbors=n_neighbors)
+            self.knn_model.fit(self.content_matrix)
 
-                return filtered_df, self.content_matrix
+            return filtered_df, self.content_matrix
         except Exception as e:
             logger.error(f"Error in prepare_model: {str(e)}")
             raise
 
-    def recommend_elective(self, selected_course_ids, skills, area_of_interest, 
+    def recommend_elective(self, selected_courses, skills, area_of_interest, 
                          future_career_paths, **kwargs):
         """Enhanced recommendation logic with better error handling"""
         try:
-            selected_courses_df = self.courses_df[self.courses_df['course_id'].isin(selected_course_ids)]
+            selected_courses_df = self.courses_df[self.courses_df['title'].isin(selected_courses)]
             if selected_courses_df.empty:
                 return {"error": "Invalid course IDs"}
 
@@ -557,15 +560,31 @@ def initialize():
     if recommender.courses_df is None:
         recommender.load_sample_data()
 
+@app.route('/api/courses', methods=['GET'])
+def get_courses():
+    """API endpoint to get all available courses"""
+    try:
+        if recommender.courses_df is None:
+            recommender.load_sample_data()
+            
+        courses = recommender.courses_df['title'].tolist()
+        return jsonify({"courses": courses})
+    except Exception as e:
+        logger.error(f"Error fetching courses: {str(e)}")
+        return jsonify({"error": "Failed to fetch courses"}), 500
+
 @app.route('/api/recommend', methods=['POST'])
 def recommend_elective():
     """API endpoint with better error handling"""
     try:
         data = request.json
-        required_fields = ['selected_course_ids', 'skills', 'area_of_interest', 'future_career_paths']
+        required_fields = ['selected_courses', 'skills', 'area_of_interest', 'future_career_paths']
         
         if not all(field in data for field in required_fields):
-            return jsonify({"error": "Missing required fields"}), 400
+            return jsonify({
+                "error": "Missing required fields",
+                "required_fields": required_fields
+            }), 400
 
         result = recommender.recommend_elective(**data)
         return jsonify(result)
@@ -574,4 +593,6 @@ def recommend_elective():
         return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == '__main__':
+    # Initialize the recommender before starting the server
+    recommender.load_sample_data()
     app.run(debug=True)
