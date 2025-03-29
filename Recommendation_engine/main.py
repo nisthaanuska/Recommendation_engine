@@ -562,35 +562,108 @@ def initialize():
 
 @app.route('/api/courses', methods=['GET'])
 def get_courses():
-    """API endpoint to get all available courses"""
+    """API endpoint to get all available courses with better error handling"""
     try:
         if recommender.courses_df is None:
             recommender.load_sample_data()
             
         courses = recommender.courses_df['title'].tolist()
-        return jsonify({"courses": courses})
+        return jsonify({
+            "status": "success",
+            "count": len(courses),
+            "courses": courses
+        })
     except Exception as e:
         logger.error(f"Error fetching courses: {str(e)}")
-        return jsonify({"error": "Failed to fetch courses"}), 500
+        return jsonify({
+            "error": "Failed to fetch courses",
+            "message": str(e),
+            "suggestion": "Please try again later or contact support"
+        }), 500
 
 @app.route('/api/recommend', methods=['POST'])
 def recommend_elective():
-    """API endpoint with better error handling"""
+    """API endpoint with comprehensive error handling"""
     try:
         data = request.json
+        if not data:
+            return jsonify({
+                "error": "No data provided",
+                "message": "Request body is empty. Please provide required fields.",
+                "required_fields": {
+                    "selected_courses": "Array of course names",
+                    "skills": "Array of skills",
+                    "area_of_interest": "Array of interests",
+                    "future_career_paths": "Array of career paths"
+                },
+                "example": {
+                    "selected_courses": ["Data Science and Machine Learning"],
+                    "skills": ["python", "machine learning"],
+                    "area_of_interest": ["artificial intelligence"],
+                    "future_career_paths": ["data scientist"]
+                }
+            }), 400
+
+        # Check for required fields
         required_fields = ['selected_courses', 'skills', 'area_of_interest', 'future_career_paths']
-        
-        if not all(field in data for field in required_fields):
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
             return jsonify({
                 "error": "Missing required fields",
-                "required_fields": required_fields
+                "missing_fields": missing_fields,
+                "required_fields": required_fields,
+                "provided_fields": list(data.keys())
+            }), 400
+
+        # Validate that arrays are not empty
+        empty_fields = [field for field in required_fields if not data.get(field, [])]
+        if empty_fields:
+            return jsonify({
+                "error": "Empty fields provided",
+                "empty_fields": empty_fields,
+                "message": "All fields must contain at least one value"
+            }), 400
+
+        # Validate course names
+        available_courses = set(recommender.courses_df['title'].tolist())
+        invalid_courses = [course for course in data['selected_courses'] if course not in available_courses]
+        if invalid_courses:
+            return jsonify({
+                "error": "Invalid course selections",
+                "invalid_courses": invalid_courses,
+                "message": "The following courses are not available in our catalog",
+                "available_courses": list(available_courses),
+                "suggestion": "Please check the course names and try again. You can get the list of available courses from /api/courses endpoint"
+            }), 400
+
+        # Validate data types
+        if not all(isinstance(field, list) for field in [
+            data['selected_courses'],
+            data['skills'],
+            data['area_of_interest'],
+            data['future_career_paths']
+        ]):
+            return jsonify({
+                "error": "Invalid data type",
+                "message": "All fields must be arrays/lists",
+                "expected_format": {
+                    "selected_courses": "Array of strings",
+                    "skills": "Array of strings",
+                    "area_of_interest": "Array of strings",
+                    "future_career_paths": "Array of strings"
+                }
             }), 400
 
         result = recommender.recommend_elective(**data)
         return jsonify(result)
+
     except Exception as e:
         logger.error(f"API error: {str(e)}")
-        return jsonify({"error": "Internal server error"}), 500
+        return jsonify({
+            "error": "Internal server error",
+            "message": str(e),
+            "help": "If the problem persists, please check your input data or contact support"
+        }), 500
 
 if __name__ == '__main__':
     # Initialize the recommender before starting the server
