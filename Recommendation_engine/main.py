@@ -2,670 +2,843 @@ import numpy as np
 import pandas as pd
 import pickle
 import os
-import threading
-import logging
-
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import MinMaxScaler
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import logging
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+import random
+from datasets import generate_academic_datasets
 
-# Setup logging
+# Simple logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
 
-class KNNElectiveRecommender:
+# Path constants
+MODEL_PATH = 'knn_recommender_model.pkl'
+SCORE_MODEL_PATH = 'score_predictor_model.pkl'
+
+class SimpleRecommender:
     def __init__(self):
-        # Modified TF-IDF parameters for small document counts
-        self.tfidf_vectorizer = TfidfVectorizer(
+        # TF-IDF for converting course content to vectors
+        self.vectorizer = TfidfVectorizer(
             stop_words='english',
             ngram_range=(1, 2),
-            max_features=5000,
-            min_df=1,     # Changed to 1 to handle small document counts
-            max_df=1.0    # Changed to 1.0 to handle small document counts
+            max_features=1000
         )
         
-        self.knn_model = NearestNeighbors(
-            n_neighbors=3,
+        # KNN for finding similar courses
+        self.model = NearestNeighbors(
+            n_neighbors=5,
             algorithm='auto',
-            metric='cosine',
-            n_jobs=-1
+            metric='cosine'
         )
         
         self.courses_df = None
-        self.content_matrix = None
-        self._lock = threading.Lock()
-
-    def load_sample_data(self):
-        """Loads dataset with more detailed courses"""
+        self.ready = False
+    
+    def load_courses(self):
+        """Load sample course data"""
         self.courses_df = pd.DataFrame([
             {
                 "course_id": "CS101",
                 "title": "Data Structures",
-                "description": "This course covers fundamental data structures, including arrays, linked lists, stacks, queues, trees, and graphs. Students will learn efficient sorting and searching algorithms, hash tables, and dynamic programming. The course emphasizes time and space complexity analysis, preparing students for coding interviews and real-world problem-solving.",
-                "keywords": ["data structures", "algorithms", "trees", "graphs", "sorting", "searching", "complexity analysis", "dynamic programming"]
+                "description": "This course covers fundamental data structures, including arrays, linked lists, stacks, queues, trees, and graphs. Students will learn efficient sorting and searching algorithms, hash tables, and dynamic programming.",
+                "keywords": ["data structures", "algorithms", "trees", "graphs", "sorting"]
             },
             {
                 "course_id": "CS102",
                 "title": "Database Management",
-                "description": "Learn the foundations of relational database systems, covering SQL, normalization, indexing, transaction management, and distributed databases. Topics include query optimization, NoSQL alternatives, and data modeling. This course is crucial for backend developers, data engineers, and software architects.",
-                "keywords": ["database", "SQL", "PostgreSQL", "MySQL", "MongoDB", "indexing", "transaction management", "data modeling", "query optimization"]
+                "description": "Learn the foundations of relational database systems, covering SQL, normalization, indexing, transaction management, and distributed databases.",
+                "keywords": ["database", "SQL", "indexing", "data modeling"]
             },
             {
                 "course_id": "CS103",
                 "title": "Operating Systems",
-                "description": "Explore the inner workings of modern operating systems, including process scheduling, memory management, file systems, and concurrency. Topics include multi-threading, virtualization, security mechanisms, and real-time OS. Practical implementations will be covered using Linux and Windows environments.",
-                "keywords": ["OS", "Linux", "Windows", "multi-threading", "scheduling", "memory management", "concurrency", "file systems", "virtualization"]
+                "description": "Explore the inner workings of modern operating systems, including process scheduling, memory management, file systems, and concurrency.",
+                "keywords": ["OS", "Linux", "Windows", "concurrency", "memory management"]
             },
             {
                 "course_id": "CS104",
                 "title": "Computer Networks",
-                "description": "Dive into the fundamentals of computer networking, covering TCP/IP, network security, routing algorithms, firewalls, VPNs, wireless networks, and cloud networking. Students will learn how data is transmitted, secured, and optimized over various network topologies.",
-                "keywords": ["networking", "TCP/IP", "routing", "firewall", "VPN", "cloud networking", "cybersecurity", "network security", "wireless networks"]
+                "description": "Dive into the fundamentals of computer networking, covering TCP/IP, network security, routing algorithms, firewalls, and VPNs.",
+                "keywords": ["networking", "TCP/IP", "routing", "network security"]
             },
             {
                 "course_id": "CS105",
                 "title": "Machine Learning",
-                "description": "A comprehensive introduction to supervised and unsupervised learning, covering regression, classification, clustering, neural networks, deep learning, feature engineering, and model evaluation. This course is ideal for data scientists and AI researchers.",
-                "keywords": ["machine learning", "AI", "deep learning", "regression", "clustering", "neural networks", "feature engineering", "model evaluation", "Python"]
+                "description": "A comprehensive introduction to supervised and unsupervised learning, covering regression, classification, clustering, neural networks, and deep learning.",
+                "keywords": ["machine learning", "AI", "deep learning", "neural networks"]
             },
             {
                 "course_id": "CS106",
                 "title": "Web Development",
-                "description": "Master full-stack web development, including HTML, CSS, JavaScript, React, Node.js, and databases. Learn about RESTful APIs, authentication, web security, server-side rendering, and modern frontend frameworks. This course is ideal for aspiring web developers.",
-                "keywords": ["web development", "frontend", "backend", "React", "Node.js", "authentication", "RESTful APIs", "JavaScript", "CSS", "MongoDB"]
+                "description": "Master full-stack web development, including HTML, CSS, JavaScript, React, Node.js, and databases.",
+                "keywords": ["web development", "frontend", "backend", "JavaScript"]
             },
             {
                 "course_id": "CS107",
                 "title": "Cybersecurity",
-                "description": "Learn about ethical hacking, encryption, network security, penetration testing, and cybersecurity threats. Topics include cryptographic algorithms, secure coding practices, malware analysis, and risk assessment. This course prepares students for security analyst roles.",
-                "keywords": ["cybersecurity", "encryption", "hacking", "penetration testing", "malware", "firewalls", "risk assessment", "secure coding", "network security"]
+                "description": "Learn about ethical hacking, encryption, network security, penetration testing, and cybersecurity threats.",
+                "keywords": ["cybersecurity", "encryption", "security", "penetration testing"]
             },
             {
                 "course_id": "CS108",
                 "title": "Software Engineering",
-                "description": "This course covers software development methodologies, including Agile, DevOps, software testing, design patterns, and software lifecycle management. Learn how to build scalable, maintainable software solutions using best engineering practices.",
-                "keywords": ["software engineering", "SDLC", "Agile", "DevOps", "testing", "design patterns", "scalability", "system design", "software maintenance"]
+                "description": "This course covers software development methodologies, including Agile, DevOps, software testing, and design patterns.",
+                "keywords": ["software engineering", "Agile", "testing", "design patterns"]
             },
             {
-                "title": "Data Mining and Data Warehousing",
-                "description": "Techniques for discovering patterns in large datasets and organizing data for analysis. Covers data preprocessing, mining algorithms, warehouse design, and ETL processes.",
-                "keywords": ["data mining", "warehousing", "ETL", "pattern recognition", "data analysis", "business intelligence"]
-            },
-            {
+                "course_id": "DS101",
                 "title": "Data Science and Machine Learning",
-                "description": "Comprehensive coverage of data science methodologies and machine learning algorithms. Includes statistical analysis, predictive modeling, and practical applications.",
-                "keywords": ["data science", "machine learning", "statistics", "predictive modeling", "analytics", "python", "R"]
+                "description": "Comprehensive coverage of data science methodologies and machine learning algorithms including statistics and predictive modeling.",
+                "keywords": ["data science", "machine learning", "statistics", "predictive modeling"]
             },
             {
-                "title": "Deep Learning and Neural Networks",
-                "description": "Advanced neural network architectures and deep learning techniques. Covers CNNs, RNNs, GANs, transformers, and their applications in various domains.",
-                "keywords": ["deep learning", "neural networks", "CNN", "RNN", "GAN", "AI", "pytorch", "tensorflow"]
+                "course_id": "CS201",
+                "title": "Deep Learning",
+                "description": "Advanced neural network architectures and deep learning techniques including CNNs, RNNs, and GANs.",
+                "keywords": ["deep learning", "neural networks", "CNN", "RNN", "AI"]
             },
             {
-                "title": "Digital Forensics",
-                "description": "Investigation of digital artifacts and cyber incidents. Covers forensic tools, techniques, incident response, and legal aspects of digital investigations.",
-                "keywords": ["forensics", "cybersecurity", "investigation", "incident response", "legal", "security"]
+                "course_id": "CS202", 
+                "title": "Artificial Intelligence",
+                "description": "Fundamentals of AI including search algorithms, knowledge representation, planning, and intelligent agents.",
+                "keywords": ["AI", "search algorithms", "knowledge representation", "planning"]
             },
             {
-                "title": "Digital Marketing and Analytics",
-                "description": "Digital marketing strategies and analytics tools for measuring campaign effectiveness. Covers SEO, social media marketing, and web analytics.",
-                "keywords": ["digital marketing", "analytics", "SEO", "social media", "web analytics", "marketing strategy"]
+                "course_id": "CS203",
+                "title": "Mobile App Development",
+                "description": "Design and develop mobile applications for iOS and Android platforms using modern frameworks.",
+                "keywords": ["mobile", "app development", "iOS", "Android", "React Native"]
             },
             {
-                "title": "Distributed Computing",
-                "description": "Principles and practices of distributed systems and computing. Covers distributed algorithms, fault tolerance, consistency models, and distributed databases.",
-                "keywords": ["distributed systems", "parallel computing", "fault tolerance", "scalability", "consistency", "algorithms"]
+                "course_id": "CS204",
+                "title": "Cloud Computing",
+                "description": "Learn about cloud services, virtualization, containers, and distributed systems in the cloud.",
+                "keywords": ["cloud", "AWS", "Azure", "virtualization", "containers"]
             },
             {
-                "title": "Edge Computing",
-                "description": "Computing paradigm that brings computation closer to data sources. Covers edge architecture, IoT integration, and real-time processing at the network edge.",
-                "keywords": ["edge computing", "IoT", "distributed systems", "real-time processing", "network architecture"]
-            },
-            {
-                "title": "Embedded Systems",
-                "description": "Design and implementation of embedded computing systems. Covers microcontrollers, real-time operating systems, and embedded software development.",
-                "keywords": ["embedded systems", "microcontrollers", "RTOS", "firmware", "IoT", "hardware"]
-            },
-            {
-                "title": "Ethical Hacking",
-                "description": "Security testing and vulnerability assessment techniques. Covers penetration testing, security auditing, and ethical aspects of security testing.",
-                "keywords": ["ethical hacking", "penetration testing", "security", "vulnerability assessment", "cybersecurity"]
-            },
-            {
-                "title": "Evolutionary Computation",
-                "description": "Nature-inspired algorithms for optimization and search. Covers genetic algorithms, evolutionary strategies, and swarm intelligence.",
-                "keywords": ["evolutionary algorithms", "genetic programming", "optimization", "swarm intelligence", "AI"]
-            },
-            {
-                "title": "Fuzzy Logic and Soft Computing",
-                "description": "Principles of fuzzy logic and its applications in computing. Covers fuzzy systems, soft computing techniques, and approximate reasoning.",
-                "keywords": ["fuzzy logic", "soft computing", "AI", "computational intelligence", "decision making"]
-            },
-            {
-                "title": "Game Development and Design",
-                "description": "Principles and practices of video game development. Covers game engines, graphics programming, game physics, and interactive design.",
-                "keywords": ["game development", "Unity", "Unreal Engine", "graphics", "game design", "programming"]
-            },
-            {
-                "title": "Geographic Information Systems",
-                "description": "Analysis and visualization of geographic data. Covers spatial analysis, mapping technologies, and GIS applications.",
-                "keywords": ["GIS", "spatial analysis", "mapping", "remote sensing", "geospatial", "data analysis"]
-            },
-            {
-                "title": "Green Computing",
-                "description": "Environmentally sustainable computing practices. Covers energy-efficient systems, sustainable IT, and green data center design.",
-                "keywords": ["green computing", "sustainability", "energy efficiency", "environmental IT", "data centers"]
-            },
-            {
-                "title": "High-Performance Computing",
-                "description": "Advanced computing architectures and parallel programming. Covers supercomputing, parallel algorithms, and performance optimization.",
-                "keywords": ["HPC", "parallel computing", "supercomputing", "optimization", "parallel programming"]
-            },
-            {
-                "title": "Human-Centered AI",
-                "description": "Design and development of AI systems focused on human needs and interaction. Covers user experience, ethical AI, and human-AI collaboration.",
-                "keywords": ["AI", "human-centered design", "UX", "ethical AI", "human-computer interaction"]
-            },
-            {
-                "title": "Humanoid Robotics",
-                "description": "Design and control of humanoid robots. Covers robot kinematics, dynamics, control systems, and human-robot interaction.",
-                "keywords": ["robotics", "humanoid", "control systems", "AI", "mechanical engineering"]
-            },
-            {
-                "title": "Image Processing and Pattern Recognition",
-                "description": "Digital image processing techniques and pattern recognition algorithms. Covers image enhancement, feature extraction, and classification.",
-                "keywords": ["image processing", "pattern recognition", "computer vision", "machine learning", "AI"]
-            },
-            {
-                "title": "Immersive Technologies",
-                "description": "Development of AR, VR, and mixed reality applications. Covers 3D modeling, interaction design, and immersive user experiences.",
-                "keywords": ["AR", "VR", "mixed reality", "3D", "interaction design", "Unity"]
-            },
-            {
-                "title": "Information and Web Security",
-                "description": "Security principles for web applications and information systems. Covers web vulnerabilities, security protocols, and defensive programming.",
-                "keywords": ["web security", "cybersecurity", "information security", "secure coding", "protocols"]
-            },
-            {
-                "title": "Next-Generation Wireless Networks",
-                "description": "Advanced study of 5G/6G technologies, network architectures, and protocols. Covers mmWave, network slicing, and emerging wireless technologies.",
-                "keywords": ["5G", "6G", "wireless", "networking", "telecommunications", "protocols", "mobile computing"]
-            },
-            {
-                "title": "Parallel and Distributed Systems",
-                "description": "Design and implementation of parallel and distributed computing systems. Covers parallel algorithms, distributed architectures, and system performance.",
-                "keywords": ["parallel computing", "distributed systems", "algorithms", "system architecture", "performance"]
-            },
-            {
-                "title": "Post-Quantum Cryptography",
-                "description": "Cryptographic systems resistant to quantum computing attacks. Covers quantum-resistant algorithms, lattice-based cryptography, and security protocols.",
-                "keywords": ["cryptography", "quantum computing", "security", "algorithms", "quantum resistance"]
-            },
-            {
-                "title": "Quantum Computing",
-                "description": "Principles of quantum computation and quantum information. Covers quantum algorithms, quantum circuits, and quantum programming frameworks.",
-                "keywords": ["quantum computing", "quantum algorithms", "quantum circuits", "quantum information", "physics"]
-            },
-            {
-                "title": "Recommender Systems",
-                "description": "Design and implementation of recommendation algorithms. Covers collaborative filtering, content-based systems, and hybrid approaches.",
-                "keywords": ["recommender systems", "machine learning", "data mining", "personalization", "algorithms"]
-            },
-            {
-                "title": "Robotics and Intelligent Systems",
-                "description": "Fundamentals of robotics and intelligent system design. Covers robot control, perception, planning, and artificial intelligence integration.",
-                "keywords": ["robotics", "AI", "control systems", "perception", "planning", "automation"]
-            },
-            {
-                "title": "Security in IoT",
-                "description": "Security challenges and solutions in Internet of Things ecosystems. Covers device security, network protocols, and threat mitigation.",
-                "keywords": ["IoT security", "cybersecurity", "embedded systems", "network security", "protocols"]
-            },
-            {
-                "title": "Self-Adaptive Software Systems",
-                "description": "Design of software systems that can modify their behavior at runtime. Covers adaptive algorithms, monitoring, and self-healing systems.",
-                "keywords": ["adaptive systems", "software engineering", "autonomous systems", "self-healing", "monitoring"]
-            },
-            {
-                "title": "Semantic Web and Ontology Engineering",
-                "description": "Technologies and principles of the semantic web. Covers ontology design, RDF, OWL, and knowledge representation.",
-                "keywords": ["semantic web", "ontology", "RDF", "knowledge representation", "linked data"]
-            },
-            {
-                "title": "Sensor Networks and Pervasive Computing",
-                "description": "Design and implementation of sensor networks and ubiquitous computing systems. Covers wireless sensors, data collection, and analysis.",
-                "keywords": ["sensor networks", "pervasive computing", "IoT", "wireless", "data collection"]
-            },
-            {
-                "title": "Social Network Analysis",
-                "description": "Analysis of social networks and online social behavior. Covers graph theory, network metrics, and social media analytics.",
-                "keywords": ["social networks", "graph analysis", "network science", "analytics", "data mining"]
-            },
-            {
-                "title": "Software Defined Networking",
-                "description": "Principles and practices of SDN and network virtualization. Covers OpenFlow, network controllers, and programmable networks.",
-                "keywords": ["SDN", "networking", "virtualization", "OpenFlow", "network programming"]
-            },
-            {
-                "title": "Software Testing and Quality Assurance",
-                "description": "Comprehensive software testing methodologies and quality practices. Covers test automation, quality metrics, and testing frameworks.",
-                "keywords": ["software testing", "QA", "test automation", "quality assurance", "testing frameworks"]
-            },
-            {
-                "title": "Speech and Audio Processing",
-                "description": "Digital processing of speech and audio signals. Covers speech recognition, synthesis, and audio analysis techniques.",
-                "keywords": ["speech processing", "audio analysis", "signal processing", "recognition", "synthesis"]
-            },
-            {
-                "title": "Swarm Intelligence",
-                "description": "Study of decentralized, self-organizing systems. Covers swarm algorithms, collective behavior, and distributed optimization.",
-                "keywords": ["swarm intelligence", "optimization", "collective behavior", "algorithms", "AI"]
-            },
-            {
-                "title": "Trust and Privacy in AI",
-                "description": "Ethical considerations and privacy aspects in AI systems. Covers privacy-preserving ML, trustworthy AI, and ethical guidelines.",
-                "keywords": ["AI ethics", "privacy", "trust", "machine learning", "data protection"]
-            },
-            {
-                "title": "Ubiquitous Computing",
-                "description": "Design of computing systems that integrate seamlessly into everyday life. Covers ambient intelligence, context-aware systems, and smart environments.",
-                "keywords": ["ubiquitous computing", "ambient intelligence", "IoT", "context-aware", "smart systems"]
-            },
-            {
-                "title": "Vehicular Ad Hoc Networks",
-                "description": "Study of communication networks for vehicles. Covers VANET protocols, vehicular communication, and intelligent transportation systems.",
-                "keywords": ["VANET", "vehicular networks", "networking", "transportation", "communication"]
-            },
-            {
-                "title": "Virtual Reality and Augmented Reality",
-                "description": "Development of VR and AR applications. Covers 3D modeling, interaction design, and immersive experience creation.",
-                "keywords": ["VR", "AR", "3D modeling", "interaction design", "immersive technology"]
-            },
-            {
-                "title": "Wearable Computing",
-                "description": "Design and development of wearable technology. Covers sensor integration, mobile computing, and human-centered design.",
-                "keywords": ["wearable technology", "mobile computing", "sensors", "IoT", "human-centered design"]
-            },
-            {
-                "title": "Web 3.0 and Decentralized Applications",
-                "description": "Development of decentralized web applications. Covers blockchain, smart contracts, and distributed systems.",
-                "keywords": ["Web3", "blockchain", "DApps", "smart contracts", "decentralized systems"]
-            },
-            {
-                "title": "Wireless Sensor Networks and IoT Security",
-                "description": "Security aspects of wireless sensor networks and IoT systems. Covers security protocols, threat analysis, and protection mechanisms.",
-                "keywords": ["WSN", "IoT security", "network security", "sensors", "protocols"]
-            },
-            {
-                "title": "Artificial Intelligence Ethics and Regulations",
-                "description": "Study of ethical implications and regulatory frameworks for AI systems. Covers AI governance, compliance, and responsible AI development.",
-                "keywords": ["AI ethics", "regulations", "compliance", "governance", "responsible AI"]
-            },
-            {
-                "title": "Bio-Medical Data Processing",
-                "description": "Processing and analysis of biomedical data. Covers medical imaging, health informatics, and clinical data analysis.",
-                "keywords": ["biomedical", "health informatics", "medical imaging", "data analysis", "healthcare"]
-            },
-            {
-                "title": "Computational Advertising",
-                "description": "Algorithmic approaches to online advertising. Covers ad targeting, recommendation systems, and marketing analytics.",
-                "keywords": ["advertising", "algorithms", "targeting", "analytics", "marketing"]
-            },
-            {
-                "title": "Computational Finance",
-                "description": "Application of computational methods in finance. Covers financial modeling, risk analysis, and algorithmic trading.",
-                "keywords": ["finance", "algorithms", "modeling", "risk analysis", "trading"]
-            },
-            {
-                "title": "Computational Geometry",
-                "description": "Study of algorithms for geometric problems. Covers geometric data structures, spatial algorithms, and computational topology.",
-                "keywords": ["geometry", "algorithms", "spatial computing", "computational topology", "mathematics"]
-            },
-            {
-                "title": "Cyber Threat Intelligence",
-                "description": "Analysis and response to cyber threats. Covers threat hunting, intelligence gathering, and security operations.",
-                "keywords": ["cybersecurity", "threat intelligence", "security operations", "analysis", "incident response"]
-            },
-            {
-                "title": "Data Visualization and Storytelling",
-                "description": "Techniques for effective data visualization and communication. Covers visual design, interactive visualization, and data narrative.",
-                "keywords": ["visualization", "data communication", "visual design", "storytelling", "analytics"]
-            },
-            {
-                "title": "Explainable AI",
-                "description": "Methods for making AI systems interpretable and explainable. Covers model interpretation, transparency, and accountability.",
-                "keywords": ["XAI", "AI interpretability", "transparency", "machine learning", "ethics"]
-            },
-            {
-                "title": "Fog Computing",
-                "description": "Computing paradigm between edge and cloud. Covers fog architecture, distributed processing, and IoT integration.",
-                "keywords": ["fog computing", "edge computing", "distributed systems", "IoT", "cloud computing"]
-            },
-            {
-                "title": "Genetic Algorithms",
-                "description": "Evolutionary computation techniques for optimization. Covers genetic programming, evolutionary strategies, and applications.",
-                "keywords": ["genetic algorithms", "evolutionary computation", "optimization", "AI", "machine learning"]
-            },
-            {
-                "title": "Graph Theory in Computer Science",
-                "description": "Applications of graph theory in computing. Covers graph algorithms, network analysis, and computational problems.",
-                "keywords": ["graph theory", "algorithms", "networks", "discrete mathematics", "computation"]
-            },
-            {
-                "title": "Haptics and Human-Computer Interaction",
-                "description": "Study of touch-based interaction in computing systems. Covers haptic interfaces, interaction design, and user experience.",
-                "keywords": ["haptics", "HCI", "interaction design", "user experience", "interfaces"]
-            },
-            {
-                "title": "Intelligent Transportation Systems",
-                "description": "Smart transportation technologies and systems. Covers traffic management, autonomous vehicles, and transportation analytics.",
-                "keywords": ["ITS", "transportation", "autonomous vehicles", "traffic management", "smart cities"]
-            },
-            {
-                "title": "Internet Law and Cyber Regulations",
-                "description": "Legal aspects of internet and technology use. Covers cyberlaws, digital rights, and regulatory compliance.",
-                "keywords": ["cyber law", "regulations", "compliance", "digital rights", "internet governance"]
-            },
-            {
-                "title": "Knowledge Engineering",
-                "description": "Development of knowledge-based systems. Covers expert systems, knowledge representation, and reasoning systems.",
-                "keywords": ["knowledge engineering", "expert systems", "AI", "knowledge representation", "reasoning"]
-            },
-            {
-                "title": "Malware Analysis",
-                "description": "Techniques for analyzing malicious software. Covers reverse engineering, threat analysis, and malware detection.",
-                "keywords": ["malware", "security", "reverse engineering", "threat analysis", "cybersecurity"]
-            },
-            {
-                "title": "Mobile and Wireless Security",
-                "description": "Security aspects of mobile and wireless systems. Covers mobile security, wireless protocols, and threat mitigation.",
-                "keywords": ["mobile security", "wireless security", "cybersecurity", "protocols", "networking"]
-            },
-            {
-                "title": "Multimodal Interaction Systems",
-                "description": "Design of systems using multiple input/output modalities. Covers speech, gesture, and multimodal interfaces.",
-                "keywords": ["multimodal", "HCI", "interfaces", "interaction design", "user experience"]
-            },
-            {
-                "title": "Neuro-Symbolic AI",
-                "description": "Integration of neural networks and symbolic reasoning. Covers hybrid AI systems, knowledge integration, and reasoning.",
-                "keywords": ["neuro-symbolic", "AI", "neural networks", "symbolic reasoning", "machine learning"]
-            },
-            {
-                "title": "Privacy-Preserving Computing",
-                "description": "Techniques for computing while preserving privacy. Covers cryptographic protocols, secure computation, and privacy technologies.",
-                "keywords": ["privacy", "security", "cryptography", "secure computation", "data protection"]
-            },
-            {
-                "title": "Software Reengineering",
-                "description": "Methods for modernizing and improving existing software. Covers code analysis, refactoring, and system modernization.",
-                "keywords": ["reengineering", "software maintenance", "refactoring", "legacy systems", "modernization"]
-            },
-            {
-                "title": "Smart Contracts and Cryptoeconomics",
-                "description": "Development and analysis of blockchain-based smart contracts. Covers contract programming, tokenomics, and blockchain economics.",
-                "keywords": ["smart contracts", "blockchain", "cryptoeconomics", "DeFi", "programming"]
-            },
-            {
-                "title": "Software Reliability",
-                "description": "Methods for developing reliable software systems. Covers fault tolerance, reliability engineering, and quality assurance.",
-                "keywords": ["reliability", "fault tolerance", "quality assurance", "testing", "software engineering"]
-            },
-            {
-                "title": "Surveillance Technologies",
-                "description": "Study of modern surveillance systems and privacy protection. Covers monitoring technologies, privacy preservation, and ethical considerations.",
-                "keywords": ["surveillance", "privacy", "security", "ethics", "monitoring"]
-            },
-            {
-                "title": "Synthetic Data Generation",
-                "description": "Techniques for generating synthetic datasets. Covers data simulation, augmentation, and privacy-preserving data generation.",
-                "keywords": ["synthetic data", "data generation", "simulation", "privacy", "machine learning"]
-            },
-            {
-                "title": "Traffic Analysis in Cybersecurity",
-                "description": "Analysis of network traffic for security purposes. Covers traffic monitoring, anomaly detection, and network forensics.",
-                "keywords": ["traffic analysis", "network security", "monitoring", "forensics", "cybersecurity"]
-            },
-            {
-                "title": "Web Personalization",
-                "description": "Techniques for personalizing web experiences. Covers user modeling, recommendation systems, and adaptive interfaces.",
-                "keywords": ["personalization", "UX", "web design", "user modeling", "adaptive systems"]
-            },
-            {
-                "title": "Zero Trust Security",
-                "description": "Implementation of zero trust security architectures. Covers security models, access control, and network segmentation.",
-                "keywords": ["zero trust", "security", "access control", "network security", "cybersecurity"]
+                "course_id": "CS205",
+                "title": "Blockchain Technology",
+                "description": "Understand blockchain principles, cryptocurrencies, smart contracts, and decentralized applications.",
+                "keywords": ["blockchain", "cryptocurrency", "smart contracts", "decentralized"]
             }
         ])
-
-    def prepare_model(self, filtered_df):
-        """Enhanced model preparation with fixed DataFrame warning"""
-        try:
-            # Create a copy to avoid the SettingWithCopyWarning
-            filtered_df = filtered_df.copy()
+        
+        # Ensure all courses have keywords as lists
+        for i, row in self.courses_df.iterrows():
+            if isinstance(row['keywords'], str):
+                self.courses_df.at[i, 'keywords'] = row['keywords'].split(',')
+    
+    def prepare_model(self):
+        """Prepare the recommendation model"""
+        # Create content field for each course by combining title, description, and keywords
+        self.courses_df['content'] = self.courses_df.apply(
+            lambda row: ' '.join([
+                row['title'] * 3,  # Repeat title for higher weight
+                row['description'],
+                ' '.join(row['keywords'] * 2)  # Repeat keywords for higher weight
+            ]).lower(),
+            axis=1
+        )
+        
+        # Transform text to TF-IDF vectors
+        content_matrix = self.vectorizer.fit_transform(self.courses_df['content'])
+        
+        # Fit KNN model
+        self.model.fit(content_matrix)
+        self.ready = True
+        
+        return content_matrix
+    
+    def get_recommendations(self, selected_courses, skills, interests, career_goals, num_recommendations=1):
+        """Get the best course from selected courses based on user preferences"""
+        if not self.ready:
+            self.prepare_model()
             
-            # Now modify the copy
-            filtered_df['content'] = filtered_df.apply(
-                lambda row: ' '.join([
-                    row['title'] * 3,
-                    row['description'],
-                    ' '.join(row['keywords'] * 4)
-                ]).lower(),
-                axis=1
-            )
-
-            # Apply TF-IDF
-            self.content_matrix = self.tfidf_vectorizer.fit_transform(filtered_df['content'])
+        # Verify selected courses exist
+        selected_courses_df = self.courses_df[self.courses_df['title'].isin(selected_courses)]
+        if len(selected_courses) == 0:
+            return {
+                "status": "error",
+                "message": "No courses selected. Please select at least one course."
+            }
             
-            # Dynamic neighbor selection
-            n_neighbors = min(3, len(filtered_df))
-            self.knn_model.set_params(n_neighbors=n_neighbors)
-            self.knn_model.fit(self.content_matrix)
-
-            return filtered_df, self.content_matrix
-        except Exception as e:
-            logger.error(f"Error in prepare_model: {str(e)}")
-            raise
-
-    def recommend_elective(self, selected_courses, skills, area_of_interest, 
-                         future_career_paths, **kwargs):
-        """Enhanced recommendation logic with better error handling"""
-        try:
-            selected_courses_df = self.courses_df[self.courses_df['title'].isin(selected_courses)]
-            if selected_courses_df.empty:
-                return {"error": "Invalid course IDs"}
-
-            # Case 1: Single course selected
-            if len(selected_courses_df) == 1:
-                course = selected_courses_df.iloc[0]
-                return {
+        if selected_courses_df.empty:
+            return {
+                "status": "error", 
+                "message": "None of the selected courses were found in our database."
+            }
+            
+        # If only one course is selected, return it directly
+        if len(selected_courses_df) == 1:
+            course = selected_courses_df.iloc[0]
+            return {
+                "status": "success",
+                "count": 1,
+                "recommendations": [{
                     "course_id": course["course_id"],
                     "title": course["title"],
                     "description": course["description"],
                     "keywords": course["keywords"],
                     "match_score": 100.0,
-                    "note": "Single course selection: returning the selected course"
-                }
-
-            # Case 2: Multiple courses
-            filtered_df, content_matrix = self.prepare_model(selected_courses_df)
-
-            # Create user profile without previous subjects
-            user_profile_components = [
-                ' '.join(skills) * 3,
-                ' '.join(area_of_interest) * 2,
-                ' '.join(future_career_paths) * 4
-            ]
-            
-            user_profile = ' '.join(component.lower() for component in user_profile_components if component)
-            user_vector = self.tfidf_vectorizer.transform([user_profile])
-
-            # Get recommendations
-            distances, indices = self.knn_model.kneighbors(user_vector)
-            similarity_scores = [round(float((1 - dist) * 100), 2) for dist in distances.flatten()]
-
-            # Get recommendations with scores
-            recommendations = []
-            for idx, score in zip(indices.flatten(), similarity_scores):
-                course = filtered_df.iloc[idx]
-                if course["course_id"] not in selected_course_ids:
-                    recommendations.append({
-                        "course_id": course["course_id"],
-                        "title": course["title"],
-                        "description": course["description"],
-                        "keywords": course["keywords"],
-                        "match_score": score
-                    })
-                    break
-
-            # If no non-selected course found, return the best matching course
-            if not recommendations:
-                best_idx = indices.flatten()[0]
-                best_course = filtered_df.iloc[best_idx]
-                return {
-                    "course_id": best_course["course_id"],
-                    "title": best_course["title"],
-                    "description": best_course["description"],
-                    "keywords": best_course["keywords"],
-                    "match_score": similarity_scores[0],
-                    "note": "Best matching course from selected courses"
-                }
-
-            return recommendations[0]
-
-        except Exception as e:
-            logger.error(f"Error in recommendation: {str(e)}")
-            # Last resort: Return the first course from selected courses
+                    "explanation": "This is your only selected course."
+                }]
+            }
+        
+        # Create user profile based on skills, interests, and career goals
+        user_profile = ' '.join([
+            ' '.join(skills) * 3,
+            ' '.join(interests) * 3,
+            ' '.join(career_goals) * 3
+        ]).lower()
+        
+        # If user profile is empty, recommend the first selected course
+        if not user_profile.strip():
             course = selected_courses_df.iloc[0]
             return {
+                "status": "success",
+                "count": 1,
+                "recommendations": [{
+                    "course_id": course["course_id"],
+                    "title": course["title"],
+                    "description": course["description"],
+                    "keywords": course["keywords"],
+                    "match_score": 100.0,
+                    "explanation": "Recommended as default since no preferences were provided."
+                }]
+            }
+        
+        # Prepare the model if content column doesn't exist
+        if 'content' not in selected_courses_df.columns:
+            # Create content field for selected courses
+            selected_courses_df['content'] = selected_courses_df.apply(
+                lambda row: ' '.join([
+                    row['title'] * 3,
+                    row['description'],
+                    ' '.join(row['keywords'] * 2)
+                ]).lower(),
+                axis=1
+            )
+            
+        # Transform selected courses content to vectors
+        selected_content = selected_courses_df['content'].tolist()
+        # Fit the vectorizer on selected courses
+        content_matrix = self.vectorizer.fit_transform(selected_content)
+        
+        # Transform user profile to vector using the same vectorizer
+        user_vector = self.vectorizer.transform([user_profile])
+        
+        # Calculate cosine similarity between user profile and each course
+        similarities = cosine_similarity(user_vector, content_matrix).flatten()
+        
+        # Get indices of courses sorted by similarity (highest first)
+        sorted_indices = similarities.argsort()[::-1]
+        
+        # Create recommendations
+        recommendations = []
+        for idx in sorted_indices[:num_recommendations]:
+            course = selected_courses_df.iloc[idx]
+            similarity = float(similarities[idx]) * 100  # Convert to percentage
+            
+            # Create explanation
+            explanation = self._create_explanation(course, skills, interests, career_goals)
+            if not explanation.startswith("Recommended"):
+                explanation = f"Recommended from your selected courses: {explanation}"
+            
+            recommendations.append({
                 "course_id": course["course_id"],
                 "title": course["title"],
                 "description": course["description"],
                 "keywords": course["keywords"],
-                "match_score": 100.0,
-                "note": "Fallback recommendation due to processing error"
+                "match_score": round(similarity, 1),
+                "explanation": explanation
+            })
+        
+        return {
+            "status": "success",
+            "count": len(recommendations),
+            "recommendations": recommendations
+        }
+    
+    def _create_explanation(self, course, skills, interests, career_goals):
+        """Create a simple explanation for recommendation"""
+        explanation_parts = []
+        
+        # Check for keyword matches
+        course_keywords = set([k.lower() for k in course['keywords']])
+        user_skills = set([s.lower() for s in skills])
+        user_interests = set([i.lower() for i in interests])
+        user_goals = set([g.lower() for g in career_goals])
+        
+        # Find overlaps
+        skill_matches = course_keywords.intersection(user_skills)
+        interest_matches = course_keywords.intersection(user_interests)
+        goal_matches = course_keywords.intersection(user_goals)
+        
+        if skill_matches:
+            explanation_parts.append(f"Matches your skills in {', '.join(skill_matches)}.")
+            
+        if interest_matches:
+            explanation_parts.append(f"Aligns with your interests in {', '.join(interest_matches)}.")
+            
+        if goal_matches:
+            explanation_parts.append(f"Supports your career goals in {', '.join(goal_matches)}.")
+            
+        if not explanation_parts:
+            # Default explanation if no specific matches
+            explanation_parts.append("Recommended based on your overall profile.")
+            
+        return " ".join(explanation_parts)
+    
+    def save_model(self):
+        """Save the model to disk"""
+        try:
+            with open(MODEL_PATH, 'wb') as f:
+                pickle.dump({
+                    'vectorizer': self.vectorizer,
+                    'model': self.model,
+                    'courses_df': self.courses_df
+                }, f)
+            return True
+        except Exception as e:
+            logger.error(f"Error saving model: {str(e)}")
+            return False
+    
+    def load_model(self):
+        """Load the model from disk"""
+        try:
+            if os.path.exists(MODEL_PATH):
+                with open(MODEL_PATH, 'rb') as f:
+                    data = pickle.load(f)
+                    self.vectorizer = data['vectorizer']
+                    self.model = data['model']
+                    self.courses_df = data['courses_df']
+                    self.ready = True
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error loading model: {str(e)}")
+            return False
+
+class ScorePredictor:
+    def __init__(self):
+        self.model = None
+        self.poly = PolynomialFeatures(degree=2)
+        self.ready = False
+        self.datasets = {}
+        self.load_datasets()
+        
+    def load_datasets(self):
+        """Load all academic datasets"""
+        self.datasets = generate_academic_datasets()
+        # Set the general dataset as the default
+        self.data = self.datasets["general"]
+        
+    def generate_sample_data(self):
+        """Generate 100 hardcoded academic records"""
+        # This method is kept for backward compatibility
+        # The actual data is now loaded from datasets.py
+        self.load_datasets()
+        
+    def train_model(self, dataset_name="general"):
+        """Train the score prediction model on selected dataset"""
+        # Set the active dataset
+        if dataset_name in self.datasets:
+            self.data = self.datasets[dataset_name]
+        else:
+            # Default to general dataset if requested one doesn't exist
+            self.data = self.datasets["general"]
+            
+        # We'll train multiple models for different semester predictions
+        self.models = {}
+        
+        # Train model for 1st semester (based on 10th, 12th)
+        X_1st = self.data[['10th', '12th']]
+        y_1st = self.data['1st']
+        X_1st_poly = self.poly.fit_transform(X_1st)
+        model_1st = LinearRegression()
+        model_1st.fit(X_1st_poly, y_1st)
+        self.models['1st'] = model_1st
+        
+        # Train models for each subsequent semester
+        for i, sem in enumerate(['2nd', '3rd', '4th', '5th', '6th', '7th', '8th']):
+            # Features are all previous grades
+            prev_sems = ['10th', '12th'] + [f'{j}st' if j == 1 else f'{j}nd' if j == 2 
+                                          else f'{j}rd' if j == 3 else f'{j}th' 
+                                          for j in range(1, i+2)]
+            
+            X = self.data[prev_sems]
+            y = self.data[sem]
+            
+            # Apply polynomial features for better prediction
+            X_poly = self.poly.fit_transform(X)
+            
+            # Train linear model
+            model = LinearRegression()
+            model.fit(X_poly, y)
+            
+            # Store model
+            self.models[sem] = model
+            
+        self.ready = True
+        return self.models
+    
+    def predict_next_semester(self, academic_record, dataset_name=None):
+        """Predict the next semester's score based on previous scores"""
+        # If dataset was specified, make sure the model is trained on it
+        if dataset_name and (not self.ready or dataset_name not in self.datasets):
+            self.train_model(dataset_name)
+        # Make sure model is trained
+        elif not self.ready:
+            self.train_model()
+            
+        # Determine which semester to predict
+        provided_sems = set(academic_record.keys())
+        
+        # Define all possible semesters in order
+        all_sems = ['10th', '12th', '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th']
+        
+        # Find the last provided semester
+        last_provided = None
+        for sem in reversed(all_sems):
+            if sem in provided_sems:
+                last_provided = sem
+                break
+        
+        # Find the next semester to predict
+        next_sem = None
+        if last_provided:
+            try:
+                last_idx = all_sems.index(last_provided)
+                if last_idx < len(all_sems) - 1:
+                    next_sem = all_sems[last_idx + 1]
+            except ValueError:
+                next_sem = None
+        
+        # If we can't determine the next semester
+        if not next_sem:
+            return {
+                "status": "error",
+                "message": "Cannot determine which semester to predict. Please provide proper previous semester scores."
             }
+        
+        # If trying to predict 1st semester, need 10th and 12th
+        if next_sem == '1st' and ('10th' not in provided_sems or '12th' not in provided_sems):
+            return {
+                "status": "error",
+                "message": "To predict 1st semester, both 10th and 12th scores are required."
+            }
+        
+        # Check if we have a model for this prediction
+        if next_sem not in self.models:
+            return {
+                "status": "error",
+                "message": f"No prediction model available for {next_sem} semester."
+            }
+        
+        # Determine required previous semesters for prediction
+        if next_sem == '1st':
+            req_sems = ['10th', '12th']
+        else:
+            sem_idx = all_sems.index(next_sem)
+            req_sems = all_sems[:sem_idx]
+        
+        # Check if all required previous semesters are provided
+        missing_sems = [sem for sem in req_sems if sem not in provided_sems]
+        if missing_sems:
+            return {
+                "status": "error",
+                "message": f"Missing scores for {', '.join(missing_sems)}. These are required to predict {next_sem} semester."
+            }
+        
+        # Create feature vector for prediction
+        X = [[academic_record[sem] for sem in req_sems]]
+        X_poly = self.poly.fit_transform(X)
+        
+        # Make prediction
+        predicted_score = float(self.models[next_sem].predict(X_poly)[0])
+        
+        # Ensure prediction is within valid GPA range
+        predicted_score = min(10.0, max(6.0, predicted_score))
+        
+        # Round to 2 decimal places
+        predicted_score = round(predicted_score, 2)
+        
+        # Prepare response with explanation
+        performance_trend = self._analyze_performance_trend(academic_record, next_sem, predicted_score)
+        
+        return {
+            "status": "success",
+            "predicted_semester": next_sem,
+            "predicted_score": predicted_score,
+            "performance_analysis": performance_trend
+        }
+    
+    def _analyze_performance_trend(self, academic_record, next_sem, predicted_score):
+        """Analyze the student's performance trend to provide insights"""
+        # Get previous semester scores in chronological order
+        all_sems = ['10th', '12th', '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th']
+        prev_scores = []
+        
+        for sem in all_sems:
+            if sem in academic_record:
+                prev_scores.append(academic_record[sem])
+        
+        # Basic analysis based on last few semesters
+        if len(prev_scores) >= 2:
+            recent_trend = prev_scores[-1] - prev_scores[-2]
+            
+            if predicted_score > prev_scores[-1]:
+                if recent_trend > 0:
+                    return "Your performance shows a consistent upward trend. Keep up the good work!"
+                else:
+                    return "Our prediction shows an improvement over your last semester, which is a positive sign."
+            elif predicted_score < prev_scores[-1]:
+                if recent_trend < 0:
+                    return "Your scores show a downward trend. Consider focusing more on your studies."
+                else:
+                    return "While your recent performance improved, our model predicts a slight decrease. Maintain your study habits."
+            else:
+                return "Your performance is predicted to remain stable."
+        
+        # If not enough previous scores, provide a generic message
+        return "Based on your academic history, this is our predicted score."
+    
+    def save_model(self):
+        """Save the score prediction models to disk"""
+        try:
+            with open(SCORE_MODEL_PATH, 'wb') as f:
+                pickle.dump({
+                    'models': self.models,
+                    'data': self.data,
+                    'datasets': self.datasets,
+                    'poly': self.poly
+                }, f)
+            return True
+        except Exception as e:
+            logger.error(f"Error saving score prediction model: {str(e)}")
+            return False
+    
+    def load_model(self):
+        """Load score prediction models from disk"""
+        try:
+            if os.path.exists(SCORE_MODEL_PATH):
+                with open(SCORE_MODEL_PATH, 'rb') as f:
+                    data = pickle.load(f)
+                    self.models = data['models']
+                    self.data = data['data']
+                    if 'datasets' in data:
+                        self.datasets = data['datasets']
+                    else:
+                        self.load_datasets()
+                    self.poly = data['poly']
+                    self.ready = True
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error loading score prediction model: {str(e)}")
+            return False
 
-# Initialize recommender
-recommender = KNNElectiveRecommender()
+# Initialize the recommender and score predictor
+recommender = SimpleRecommender()
+score_predictor = ScorePredictor()
 
+# API routes
 @app.before_request
 def initialize():
-    """Loads courses before the first request"""
+    """Initialize models before first request"""
     if recommender.courses_df is None:
-        recommender.load_sample_data()
+        if not recommender.load_model():
+            recommender.load_courses()
+            recommender.prepare_model()
+            recommender.save_model()
+            
+    if not score_predictor.ready:
+        if not score_predictor.load_model():
+            score_predictor.train_model()
+            score_predictor.save_model()
 
 @app.route('/api/courses', methods=['GET'])
 def get_courses():
-    """API endpoint to get all available courses with better error handling"""
-    try:
-        if recommender.courses_df is None:
-            recommender.load_sample_data()
-            
-        courses = recommender.courses_df['title'].tolist()
-        return jsonify({
-            "status": "success",
-            "count": len(courses),
-            "courses": courses
-        })
-    except Exception as e:
-        logger.error(f"Error fetching courses: {str(e)}")
-        return jsonify({
-            "error": "Failed to fetch courses",
-            "message": str(e),
-            "suggestion": "Please try again later or contact support"
-        }), 500
+    """Get all available courses"""
+    courses = recommender.courses_df['title'].tolist()
+    return jsonify({
+        "status": "success",
+        "count": len(courses),
+        "courses": courses
+    })
 
 @app.route('/api/recommend', methods=['POST'])
-def recommend_elective():
-    """API endpoint with comprehensive error handling"""
+def recommend_courses():
+    """Get course recommendations"""
     try:
         data = request.json
+        
+        # Validate input
         if not data:
             return jsonify({
                 "error": "No data provided",
-                "message": "Request body is empty. Please provide required fields.",
-                "required_fields": {
-                    "selected_courses": "Array of course names",
-                    "skills": "Array of skills",
-                    "area_of_interest": "Array of interests",
-                    "future_career_paths": "Array of career paths"
-                },
                 "example": {
-                    "selected_courses": ["Data Science and Machine Learning"],
-                    "skills": ["python", "machine learning"],
-                    "area_of_interest": ["artificial intelligence"],
-                    "future_career_paths": ["data scientist"]
+                    "selected_courses": ["Data Structures", "Machine Learning", "Web Development"],
+                    "skills": ["python", "algorithms"],
+                    "interests": ["artificial intelligence"],
+                    "career_goals": ["software engineer"]
                 }
             }), 400
-
-        # Check for required fields
-        required_fields = ['selected_courses', 'skills', 'area_of_interest', 'future_career_paths']
-        missing_fields = [field for field in required_fields if field not in data]
-        if missing_fields:
+            
+        # Extract parameters with defaults
+        selected_courses = data.get('selected_courses', [])
+        skills = data.get('skills', [])
+        interests = data.get('interests', [])
+        career_goals = data.get('career_goals', [])
+        num_recommendations = min(int(data.get('num_recommendations', 1)), len(selected_courses))
+        
+        # Ensure at least one selected course
+        if not selected_courses:
             return jsonify({
-                "error": "Missing required fields",
-                "missing_fields": missing_fields,
-                "required_fields": required_fields,
-                "provided_fields": list(data.keys())
+                "error": "No courses selected",
+                "message": "Please select at least one course"
             }), 400
-
-        # Validate that arrays are not empty
-        empty_fields = [field for field in required_fields if not data.get(field, [])]
-        if empty_fields:
-            return jsonify({
-                "error": "Empty fields provided",
-                "empty_fields": empty_fields,
-                "message": "All fields must contain at least one value"
-            }), 400
-
-        # Validate course names
-        available_courses = set(recommender.courses_df['title'].tolist())
-        invalid_courses = [course for course in data['selected_courses'] if course not in available_courses]
-        if invalid_courses:
-            return jsonify({
-                "error": "Invalid course selections",
-                "invalid_courses": invalid_courses,
-                "message": "The following courses are not available in our catalog",
-                "available_courses": list(available_courses),
-                "suggestion": "Please check the course names and try again. You can get the list of available courses from /api/courses endpoint"
-            }), 400
-
-        # Validate data types
-        if not all(isinstance(field, list) for field in [
-            data['selected_courses'],
-            data['skills'],
-            data['area_of_interest'],
-            data['future_career_paths']
-        ]):
-            return jsonify({
-                "error": "Invalid data type",
-                "message": "All fields must be arrays/lists",
-                "expected_format": {
-                    "selected_courses": "Array of strings",
-                    "skills": "Array of strings",
-                    "area_of_interest": "Array of strings",
-                    "future_career_paths": "Array of strings"
-                }
-            }), 400
-
-        result = recommender.recommend_elective(**data)
+            
+        # Get recommendations
+        result = recommender.get_recommendations(
+            selected_courses, 
+            skills, 
+            interests, 
+            career_goals, 
+            num_recommendations
+        )
+        
         return jsonify(result)
-
+        
     except Exception as e:
-        logger.error(f"API error: {str(e)}")
+        logger.error(f"Error in recommendation: {str(e)}")
         return jsonify({
-            "error": "Internal server error",
-            "message": str(e),
-            "help": "If the problem persists, please check your input data or contact support"
+            "error": "Failed to generate recommendations",
+            "message": str(e)
         }), 500
 
+@app.route('/api/course/<course_id>', methods=['GET'])
+def get_course(course_id):
+    """Get details for a specific course"""
+    course = recommender.courses_df[recommender.courses_df['course_id'] == course_id]
+    
+    if course.empty:
+        return jsonify({
+            "error": "Course not found"
+        }), 404
+        
+    return jsonify({
+        "status": "success",
+        "course": course.iloc[0].drop('content', errors='ignore').to_dict()
+    })
+
+@app.route('/api/predict-score', methods=['POST'])
+def predict_score():
+    """Predict next semester's score based on academic history"""
+    try:
+        data = request.json
+        
+        # Validate input
+        if not data:
+            return jsonify({
+                "error": "No data provided",
+                "example": {
+                    "10th": 9.12,
+                    "12th": 8.75,
+                    "1st": 9.43,
+                    "2nd": 9.33,
+                    "3rd": 9.23,
+                    "dataset": "engineering"  # Optional dataset name
+                },
+                "note": "Provide your academic scores in order. For 1st semester prediction, provide 10th and 12th scores."
+            }), 400
+            
+        # Extract dataset name if provided
+        dataset_name = data.pop('dataset', None)
+        
+        # Ensure we have at least one academic score
+        if not any(key in data for key in ['10th', '12th', '1st', '2nd', '3rd', '4th', '5th', '6th', '7th']):
+            return jsonify({
+                "error": "No valid academic scores provided",
+                "message": "Please provide at least your 10th and 12th scores."
+            }), 400
+            
+        # Get prediction
+        result = score_predictor.predict_next_semester(data, dataset_name)
+        
+        # Add dataset info to response
+        if dataset_name:
+            result['dataset'] = dataset_name
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error in score prediction: {str(e)}")
+        return jsonify({
+            "error": "Failed to generate score prediction",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/academic-records', methods=['GET'])
+def get_academic_records():
+    """Get sample academic records from the dataset"""
+    try:
+        # Get query parameters
+        limit = request.args.get('limit', default=10, type=int)
+        offset = request.args.get('offset', default=0, type=int)
+        pattern = request.args.get('pattern', default=None, type=int)
+        dataset = request.args.get('dataset', default='general')
+        
+        # Ensure models are initialized
+        if not score_predictor.ready:
+            if not score_predictor.load_model():
+                score_predictor.train_model()
+        
+        # Get the appropriate dataset
+        if dataset in score_predictor.datasets:
+            data_df = score_predictor.datasets[dataset]
+        else:
+            data_df = score_predictor.data
+            dataset = 'general'
+        
+        # Get data based on parameters
+        if pattern is not None and 0 <= pattern <= 9:
+            # Get variations of a specific pattern
+            pattern_indices = [pattern] + [10 + pattern + (i * 10) for i in range(9)]
+            records = data_df.iloc[pattern_indices].reset_index(drop=True)
+        else:
+            # Get records with pagination
+            records = data_df.iloc[offset:offset+limit].reset_index(drop=True)
+        
+        # Convert to dict for JSON response
+        records_dict = records.to_dict(orient='records')
+        
+        # Add descriptions for the first 10 patterns (general patterns)
+        pattern_descriptions = [
+            "Example provided in the prompt",
+            "High performer with consistent scores",
+            "Average performer with gradual improvement",
+            "Strong start but declining performance",
+            "Weak start but significant improvement",
+            "Fluctuating performance",
+            "Consistent average performer",
+            "U-shaped performance (starts high, dips, recovers)",
+            "Inverted U-shape (starts low, peaks, declines)",
+            "Late bloomer (mediocre start, strong finish)"
+        ]
+        
+        # Add descriptions to the first 10 records if they're included
+        for i, record in enumerate(records_dict):
+            if i < 10 and (pattern is None or pattern == i):
+                record['description'] = pattern_descriptions[i % 10]
+        
+        return jsonify({
+            "status": "success",
+            "dataset": dataset,
+            "count": len(records_dict),
+            "total_records": len(data_df),
+            "records": records_dict,
+            "patterns": {
+                f"pattern_{i}": pattern_descriptions[i] for i in range(10)
+            },
+            "available_datasets": list(score_predictor.datasets.keys())
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting academic records: {str(e)}")
+        return jsonify({
+            "error": "Failed to get academic records",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/datasets', methods=['GET'])
+def get_available_datasets():
+    """Get list of all available academic datasets"""
+    try:
+        # Ensure score predictor is initialized
+        if not score_predictor.ready:
+            if not score_predictor.load_model():
+                score_predictor.train_model()
+                
+        # Get dataset information
+        dataset_info = {
+            "general": "General academic patterns across disciplines",
+            "engineering": "Engineering student performance patterns",
+            "medical": "Medical school student performance patterns",
+            "business": "Business and management student performance patterns",
+            "arts": "Arts and humanities student performance patterns"
+        }
+        
+        # Count records in each dataset
+        dataset_counts = {name: len(df) for name, df in score_predictor.datasets.items()}
+        
+        return jsonify({
+            "status": "success",
+            "available_datasets": list(score_predictor.datasets.keys()),
+            "dataset_info": dataset_info,
+            "record_counts": dataset_counts,
+            "usage": "Specify dataset in POST body when using /api/predict-score, or as query parameter for /api/academic-records"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting datasets: {str(e)}")
+        return jsonify({
+            "error": "Failed to get datasets",
+            "message": str(e)
+        }), 500
+
+@app.route('/', methods=['GET'])
+def index():
+    """API documentation"""
+    return jsonify({
+        "name": "Academic Recommendation API",
+        "endpoints": {
+            "/api/courses": "GET - List all courses",
+            "/api/course/<course_id>": "GET - Get course details",
+            "/api/recommend": "POST - Get course recommendations",
+            "/api/predict-score": "POST - Predict next semester's score",
+            "/api/academic-records": "GET - View sample academic records",
+            "/api/datasets": "GET - List all available academic datasets"
+        },
+        "examples": {
+            "recommend": {
+                "url": "/api/recommend",
+                "method": "POST",
+                "body": {
+                    "selected_courses": ["Data Structures", "Machine Learning", "Web Development"],
+                    "skills": ["python", "algorithms"],
+                    "interests": ["artificial intelligence"],
+                    "career_goals": ["software engineer"]
+                }
+            },
+            "predict-score": {
+                "url": "/api/predict-score",
+                "method": "POST",
+                "body": {
+                    "10th": 9.12,
+                    "12th": 8.75,
+                    "1st": 9.43,
+                    "2nd": 9.33,
+                    "3rd": 9.23,
+                    "dataset": "engineering"  # Optional - specify dataset
+                }
+            },
+            "academic-records": {
+                "url": "/api/academic-records?limit=10&offset=0&dataset=medical",
+                "method": "GET",
+                "description": "Get sample academic records. Use pattern=0-9 to view specific patterns."
+            }
+        }
+    })
+
 if __name__ == '__main__':
-    # Initialize the recommender before starting the server
-    recommender.load_sample_data()
-    app.run(debug=True)
+    app.run(debug=True) 
