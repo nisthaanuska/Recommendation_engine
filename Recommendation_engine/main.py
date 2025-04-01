@@ -44,91 +44,193 @@ class SimpleRecommender:
         self.ready = False
     
     def load_courses(self):
-        """Load sample course data"""
+        """Load elective course data"""
         self.courses_df = pd.DataFrame([
             {
-                "course_id": "CS101",
-                "title": "Data Structures",
-                "description": "This course covers fundamental data structures, including arrays, linked lists, stacks, queues, trees, and graphs. Students will learn efficient sorting and searching algorithms, hash tables, and dynamic programming.",
-                "keywords": ["data structures", "algorithms", "trees", "graphs", "sorting"]
+                "course_id": "CS301",
+                "title": "Advanced Algorithms",
+                "description": "Advanced study of algorithm design and analysis, including complex data structures, dynamic programming, graph algorithms, and algorithmic paradigms.",
+                "keywords": ["algorithms", "data structures", "dynamic programming", "graph algorithms", "complexity analysis", "optimization", "problem solving", "computational complexity", "algorithmic paradigms", "divide and conquer"]
             },
             {
-                "course_id": "CS102",
-                "title": "Database Management",
-                "description": "Learn the foundations of relational database systems, covering SQL, normalization, indexing, transaction management, and distributed databases.",
-                "keywords": ["database", "SQL", "indexing", "data modeling"]
+                "course_id": "CS302",
+                "title": "Advanced Computer Networks",
+                "description": "In-depth study of modern computer networks, protocols, network security, and emerging networking technologies.",
+                "keywords": ["computer networks", "protocols", "TCP/IP", "network security", "routing", "switching", "SDN", "network architecture", "network protocols", "wireless networks"]
             },
             {
-                "course_id": "CS103",
-                "title": "Operating Systems",
-                "description": "Explore the inner workings of modern operating systems, including process scheduling, memory management, file systems, and concurrency.",
-                "keywords": ["OS", "Linux", "Windows", "concurrency", "memory management"]
+                "course_id": "CS303",
+                "title": "Agile Software Development",
+                "description": "Modern agile methodologies, practices, and tools for efficient software development and project management.",
+                "keywords": ["agile", "scrum", "kanban", "sprint planning", "software development", "project management", "continuous integration", "DevOps", "test-driven development", "team collaboration"]
             },
             {
-                "course_id": "CS104",
-                "title": "Computer Networks",
-                "description": "Dive into the fundamentals of computer networking, covering TCP/IP, network security, routing algorithms, firewalls, and VPNs.",
-                "keywords": ["networking", "TCP/IP", "routing", "network security"]
+                "course_id": "CS304",
+                "title": "Big Data Analytics",
+                "description": "Analysis and processing of large-scale data sets using modern big data tools and technologies.",
+                "keywords": ["big data", "hadoop", "spark", "data analytics", "distributed computing", "data processing", "NoSQL", "data visualization", "MapReduce", "data mining"]
             },
             {
-                "course_id": "CS105",
-                "title": "Machine Learning",
-                "description": "A comprehensive introduction to supervised and unsupervised learning, covering regression, classification, clustering, neural networks, and deep learning.",
-                "keywords": ["machine learning", "AI", "deep learning", "neural networks"]
-            },
-            {
-                "course_id": "CS106",
-                "title": "Web Development",
-                "description": "Master full-stack web development, including HTML, CSS, JavaScript, React, Node.js, and databases.",
-                "keywords": ["web development", "frontend", "backend", "JavaScript"]
-            },
-            {
-                "course_id": "CS107",
-                "title": "Cybersecurity",
-                "description": "Learn about ethical hacking, encryption, network security, penetration testing, and cybersecurity threats.",
-                "keywords": ["cybersecurity", "encryption", "security", "penetration testing"]
-            },
-            {
-                "course_id": "CS108",
-                "title": "Software Engineering",
-                "description": "This course covers software development methodologies, including Agile, DevOps, software testing, and design patterns.",
-                "keywords": ["software engineering", "Agile", "testing", "design patterns"]
-            },
-            {
-                "course_id": "DS101",
-                "title": "Data Science and Machine Learning",
-                "description": "Comprehensive coverage of data science methodologies and machine learning algorithms including statistics and predictive modeling.",
-                "keywords": ["data science", "machine learning", "statistics", "predictive modeling"]
-            },
-            {
-                "course_id": "CS201",
-                "title": "Deep Learning",
-                "description": "Advanced neural network architectures and deep learning techniques including CNNs, RNNs, and GANs.",
-                "keywords": ["deep learning", "neural networks", "CNN", "RNN", "AI"]
-            },
-            {
-                "course_id": "CS202", 
-                "title": "Artificial Intelligence",
-                "description": "Fundamentals of AI including search algorithms, knowledge representation, planning, and intelligent agents.",
-                "keywords": ["AI", "search algorithms", "knowledge representation", "planning"]
-            },
-            {
-                "course_id": "CS203",
-                "title": "Mobile App Development",
-                "description": "Design and develop mobile applications for iOS and Android platforms using modern frameworks.",
-                "keywords": ["mobile", "app development", "iOS", "Android", "React Native"]
-            },
-            {
-                "course_id": "CS204",
-                "title": "Cloud Computing",
-                "description": "Learn about cloud services, virtualization, containers, and distributed systems in the cloud.",
-                "keywords": ["cloud", "AWS", "Azure", "virtualization", "containers"]
-            },
-            {
-                "course_id": "CS205",
+                "course_id": "CS305",
                 "title": "Blockchain Technology",
-                "description": "Understand blockchain principles, cryptocurrencies, smart contracts, and decentralized applications.",
-                "keywords": ["blockchain", "cryptocurrency", "smart contracts", "decentralized"]
+                "description": "Fundamentals of blockchain, cryptocurrencies, smart contracts, and decentralized applications.",
+                "keywords": ["blockchain", "cryptocurrency", "smart contracts", "distributed ledger", "consensus algorithms", "cryptography", "decentralized systems", "web3", "ethereum", "bitcoin"]
+            },
+            {
+                "course_id": "CS306",
+                "title": "Computer Graphics and Animation",
+                "description": "Principles and techniques of computer graphics, 3D modeling, animation, and visualization.",
+                "keywords": ["computer graphics", "3D modeling", "animation", "rendering", "OpenGL", "visualization", "game graphics", "shaders", "texture mapping", "computer animation"]
+            },
+            {
+                "course_id": "CS307",
+                "title": "Computer Vision and Image Processing",
+                "description": "Advanced techniques in computer vision, image processing, and visual understanding systems.",
+                "keywords": ["computer vision", "image processing", "object detection", "feature extraction", "machine learning", "OpenCV", "deep learning", "pattern recognition", "image analysis", "visual computing"]
+            },
+            {
+                "course_id": "CS308",
+                "title": "Cyber-Physical Systems",
+                "description": "Integration of computation, networking, and physical processes in modern embedded systems.",
+                "keywords": ["cyber-physical systems", "IoT", "embedded systems", "real-time systems", "sensor networks", "control systems", "automation", "industrial IoT", "smart systems", "robotics"]
+            },
+            {
+                "course_id": "CS309",
+                "title": "Data Mining and Data Warehousing",
+                "description": "Techniques and tools for data mining, knowledge discovery, and data warehouse design.",
+                "keywords": ["data mining", "data warehousing", "ETL", "OLAP", "business intelligence", "predictive analytics", "clustering", "association rules", "data modeling", "statistical analysis"]
+            },
+            {
+                "course_id": "CS310",
+                "title": "Data Science and Machine Learning",
+                "description": "Comprehensive coverage of data science methodologies and machine learning algorithms.",
+                "keywords": ["data science", "machine learning", "statistical analysis", "predictive modeling", "data visualization", "Python", "R", "scikit-learn", "pandas", "data analytics"]
+            },
+            {
+                "course_id": "CS311",
+                "title": "Deep Learning and Neural Networks",
+                "description": "Advanced neural network architectures and deep learning techniques for AI applications.",
+                "keywords": ["deep learning", "neural networks", "CNN", "RNN", "LSTM", "tensorflow", "pytorch", "AI", "backpropagation", "GPU computing"]
+            },
+            {
+                "course_id": "CS312",
+                "title": "Distributed Computing",
+                "description": "Principles and practices of distributed systems and parallel computing.",
+                "keywords": ["distributed systems", "parallel computing", "distributed algorithms", "cloud computing", "scalability", "fault tolerance", "distributed databases", "microservices", "containerization", "cluster computing"]
+            },
+            {
+                "course_id": "CS313",
+                "title": "Distributed Operating Systems",
+                "description": "Advanced concepts in distributed operating systems and distributed system design.",
+                "keywords": ["operating systems", "distributed systems", "process management", "distributed file systems", "synchronization", "distributed algorithms", "virtualization", "system architecture", "resource management", "networking"]
+            },
+            {
+                "course_id": "CS314",
+                "title": "Edge Computing",
+                "description": "Computing paradigms and technologies for edge and fog computing environments.",
+                "keywords": ["edge computing", "fog computing", "IoT", "distributed systems", "real-time processing", "mobile computing", "edge analytics", "5G", "cloud computing", "network optimization"]
+            },
+            {
+                "course_id": "CS315",
+                "title": "Embedded Systems",
+                "description": "Design and development of embedded systems and real-time applications.",
+                "keywords": ["embedded systems", "microcontrollers", "real-time systems", "firmware", "IoT", "hardware interfaces", "RTOS", "embedded software", "digital electronics", "system programming"]
+            },
+            {
+                "course_id": "CS316",
+                "title": "Game Development and Design",
+                "description": "Principles and practices of game design, development, and interactive entertainment.",
+                "keywords": ["game development", "Unity", "Unreal Engine", "game design", "3D graphics", "game physics", "game AI", "game programming", "interactive design", "game mechanics"]
+            },
+            {
+                "course_id": "CS317",
+                "title": "High-Performance Computing",
+                "description": "Advanced concepts in parallel processing and high-performance computing systems.",
+                "keywords": ["HPC", "parallel computing", "GPU computing", "cluster computing", "supercomputing", "parallel algorithms", "MPI", "OpenMP", "performance optimization", "scientific computing"]
+            },
+            {
+                "course_id": "CS318",
+                "title": "Image Processing and Pattern Recognition",
+                "description": "Advanced techniques for processing images and recognizing patterns in visual data.",
+                "keywords": ["image processing", "pattern recognition", "computer vision", "feature extraction", "image enhancement", "image segmentation", "object recognition", "machine learning", "digital image processing", "image filtering"]
+            },
+            {
+                "course_id": "CS319",
+                "title": "Immersive Technologies",
+                "description": "Development and applications of AR, VR, and mixed reality technologies.",
+                "keywords": ["AR", "VR", "mixed reality", "Unity", "3D modeling", "interaction design", "spatial computing", "computer graphics", "XR development", "immersive experiences"]
+            },
+            {
+                "course_id": "CS320",
+                "title": "Information and Web Security",
+                "description": "Security principles, cryptography, and protection mechanisms for web and information systems.",
+                "keywords": ["cybersecurity", "web security", "cryptography", "network security", "ethical hacking", "penetration testing", "security protocols", "authentication", "authorization", "secure coding"]
+            },
+            {
+                "course_id": "CS321",
+                "title": "Information Retrieval Systems",
+                "description": "Design and implementation of systems for searching and retrieving information from large data collections.",
+                "keywords": ["information retrieval", "search engines", "text mining", "indexing", "ranking algorithms", "query processing", "web search", "document classification", "semantic search", "retrieval models"]
+            },
+            {
+                "course_id": "CS322",
+                "title": "Internet and Web Technologies",
+                "description": "Advanced concepts in web development, protocols, and modern web technologies.",
+                "keywords": ["web technologies", "HTTP", "RESTful APIs", "HTML5", "CSS3", "JavaScript frameworks", "web services", "responsive design", "progressive web apps", "web protocols"]
+            },
+            {
+                "course_id": "CS323",
+                "title": "Mobile App Development",
+                "description": "Design and development of mobile applications for various platforms using modern frameworks.",
+                "keywords": ["mobile development", "iOS", "Android", "React Native", "Flutter", "mobile UI/UX", "app architecture", "mobile APIs", "cross-platform development", "mobile testing"]
+            },
+            {
+                "course_id": "CS324",
+                "title": "Multimedia Computing",
+                "description": "Processing, analysis, and presentation of multimedia content including audio, video, and images.",
+                "keywords": ["multimedia", "audio processing", "video processing", "compression algorithms", "streaming technologies", "media encoding", "multimedia databases", "content-based retrieval", "interactive media", "digital media"]
+            },
+            {
+                "course_id": "CS325",
+                "title": "Natural Language Processing",
+                "description": "Processing and understanding human language using computational techniques and AI.",
+                "keywords": ["NLP", "text mining", "machine learning", "language models", "BERT", "transformers", "text analysis", "sentiment analysis", "information extraction", "computational linguistics"]
+            },
+            {
+                "course_id": "CS326",
+                "title": "Next-Generation Wireless Networks",
+                "description": "Advanced wireless technologies including 5G, 6G, and future network architectures.",
+                "keywords": ["5G", "6G", "wireless networks", "mobile communications", "network protocols", "IoT networking", "spectrum management", "network slicing", "edge computing", "wireless technologies"]
+            },
+            {
+                "course_id": "CS327",
+                "title": "Parallel and Distributed Systems",
+                "description": "Design and implementation of parallel algorithms and distributed computing systems.",
+                "keywords": ["parallel computing", "distributed systems", "concurrent programming", "parallel algorithms", "scalability", "multiprocessing", "distributed databases", "cluster computing", "performance optimization", "GPGPU"]
+            },
+            {
+                "course_id": "CS328",
+                "title": "Quantum Computing",
+                "description": "Principles of quantum computation and quantum algorithms.",
+                "keywords": ["quantum computing", "quantum algorithms", "quantum mechanics", "quantum circuits", "qubits", "quantum gates", "quantum programming", "quantum cryptography", "quantum simulation", "quantum information"]
+            },
+            {
+                "course_id": "CS329",
+                "title": "Fog Computing",
+                "description": "Computing paradigm that extends cloud computing to the edge of the network, allowing data processing closer to the source.",
+                "keywords": ["fog computing", "edge computing", "IoT", "distributed systems", "network architecture", "cloud integration", "real-time processing", "data localization", "network optimization", "sensor networks"]
+            },
+            {
+                "course_id": "CS330",
+                "title": "Computational Intelligence",
+                "description": "Study of nature-inspired computational approaches and intelligent systems.",
+                "keywords": ["computational intelligence", "neural networks", "fuzzy logic", "evolutionary computation", "swarm intelligence", "genetic algorithms", "machine learning", "pattern recognition", "optimization", "adaptive systems"]
+            },
+            {
+                "course_id": "CS331",
+                "title": "Compiler Design",
+                "description": "Principles and techniques of programming language implementation and compiler construction.",
+                "keywords": ["compiler design", "programming languages", "lexical analysis", "parsing", "code generation", "optimization", "language processing", "syntax analysis", "semantic analysis", "intermediate code"]
             }
         ])
         
